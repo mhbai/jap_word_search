@@ -1,4 +1,4 @@
-		const VERSION = "v2.2.0";
+		const VERSION = "v2.3.0";
         console.log('VERSION:', VERSION);
         // === 核心工具 ===
         function mulberry32(a) {
@@ -39,6 +39,84 @@
             'ヶ': 'ka', 'ヵ': 'ka',
         } };
         const romajiText = word => wanakana.toRomaji(wanakana.toKatakana(word.reading), romajiOptions);
+        const speechSupported = !!window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function';
+        const speechStatus = document.getElementById('speech-status');
+        const speechRate = document.getElementById('speech-rate');
+        let activeUtterance = null;
+        let activeSpeechButton = null;
+        try {
+            const savedRate = localStorage.getItem('japaneseWordSearchV1SpeechRate');
+            if (savedRate === '1' || savedRate === '0.75') speechRate.value = savedRate;
+        } catch (_) {}
+        speechRate.addEventListener('change', () => {
+            localStorage.setItem('japaneseWordSearchV1SpeechRate', speechRate.value);
+        });
+        if (speechSupported) window.speechSynthesis.getVoices();
+
+        function showSpeechStatus(message) {
+            speechStatus.textContent = message;
+            speechStatus.classList.toggle('hidden', !message);
+        }
+
+        function stopPronunciation() {
+            const previousButton = activeSpeechButton;
+            activeUtterance = null;
+            activeSpeechButton = null;
+            if (previousButton) {
+                previousButton.setAttribute('aria-pressed', 'false');
+                previousButton.classList.remove('bg-green-100', 'text-green-700');
+            }
+            if (speechSupported) window.speechSynthesis.cancel();
+        }
+
+        function speakWord(word, button) {
+            if (!speechSupported) {
+                showSpeechStatus('此瀏覽器不支援語音朗讀，請改用支援語音的瀏覽器。');
+                return;
+            }
+            stopPronunciation();
+            const synth = window.speechSynthesis;
+            const voices = synth.getVoices();
+            const japaneseVoices = voices.filter(voice => /^ja(?:[-_]|$)/i.test(voice.lang));
+            if (voices.length && !japaneseVoices.length) {
+                showSpeechStatus('此裝置沒有可用的日文語音，請安裝日文語音或改用其他瀏覽器。');
+                return;
+            }
+            // Use the exact reading so homographs are not read with a different pronunciation.
+            const utterance = new window.SpeechSynthesisUtterance(word.reading);
+            utterance.lang = 'ja-JP';
+            utterance.rate = speechRate.value === '0.75' ? 0.75 : 1;
+            utterance.pitch = 1;
+            if (japaneseVoices.length) {
+                utterance.voice = japaneseVoices.find(voice => voice.default) || japaneseVoices[0];
+            }
+            activeUtterance = utterance;
+            activeSpeechButton = button;
+            button.setAttribute('aria-pressed', 'true');
+            button.classList.add('bg-green-100', 'text-green-700');
+            showSpeechStatus('');
+            const finish = () => {
+                if (activeUtterance !== utterance) return;
+                activeUtterance = null;
+                activeSpeechButton = null;
+                button.setAttribute('aria-pressed', 'false');
+                button.classList.remove('bg-green-100', 'text-green-700');
+            };
+            utterance.onend = finish;
+            utterance.onerror = event => {
+                if (activeUtterance !== utterance) return;
+                finish();
+                if (event.error !== 'canceled' && event.error !== 'interrupted') {
+                    showSpeechStatus('無法播放日文發音，請確認裝置有日文語音及聲音已開啟，再試一次。');
+                }
+            };
+            try {
+                synth.speak(utterance);
+            } catch (_) {
+                finish();
+                showSpeechStatus('無法播放日文發音，請稍後再試或改用其他瀏覽器。');
+            }
+        }
         function revealAnswer(item, word) {
             item.querySelector('.word-text').textContent = answerText(word);
             item.querySelector('.romaji-text').textContent = romajiText(word);
@@ -329,6 +407,8 @@
         }
 
         function initGame() {
+            stopPronunciation();
+            showSpeechStatus(speechSupported ? '' : '此瀏覽器不支援語音朗讀，請改用支援語音的瀏覽器。');
             clearTimeout(overlayTimer);
             updateLevelDropdownState();
             const currentLevelNum = parseInt(levelSelect.value);
@@ -664,6 +744,7 @@
         }
 
         function renderWordList() {
+            stopPronunciation();
             wordListContainer.innerHTML = '';
             currentWords.forEach(wordObj => {
                 const li = document.createElement('li');
@@ -723,7 +804,7 @@
                 checkIcon.appendChild(checkPath);
 
                 const textDiv = document.createElement('div');
-                textDiv.className = 'flex flex-col min-w-0 break-words';
+                textDiv.className = 'flex flex-col flex-1 min-w-0 break-words';
                 const mainText = document.createElement('span');
                 mainText.className = 'word-text text-base leading-snug';
                 mainText.textContent = solved || revealed ? answerText(wordObj) : fullText;
@@ -748,6 +829,19 @@
                 li.appendChild(starBtn);
                 li.appendChild(checkIcon);
                 li.appendChild(textDiv);
+                const speaker = document.createElement('button');
+                speaker.type = 'button';
+                speaker.className = 'speech-btn w-9 h-9 inline-flex items-center justify-center flex-shrink-0 rounded-full text-slate-500 hover:bg-green-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-green-600';
+                speaker.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 3 9 3 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.08M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+                speaker.setAttribute('aria-label', '播放日文發音');
+                speaker.setAttribute('aria-pressed', 'false');
+                speaker.title = speechSupported ? '播放日文發音' : '此瀏覽器不支援語音朗讀';
+                speaker.disabled = !speechSupported;
+                speaker.onclick = event => {
+                    event.stopPropagation();
+                    speakWord(wordObj, speaker);
+                };
+                li.appendChild(speaker);
 
                 wordListContainer.appendChild(li);
             });
@@ -1004,6 +1098,7 @@ function runSimulation() {
             maxUnlocked = loadProgress();
             globalSeed = loadGlobalSeed();
             loadDifficultWords();
+            window.addEventListener('pagehide', stopPronunciation);
 
             gridContainer.addEventListener('pointerdown', handlePointerDown);
             window.addEventListener('pointermove', handlePointerMove, { passive: false });
