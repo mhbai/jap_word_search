@@ -7,7 +7,7 @@ const { chromium } = require(process.env.JAPANESE_GAME_PLAYWRIGHT || 'playwright
 const root = path.join(__dirname, '..');
 const server = http.createServer((req, res) => {
     const name = req.url === '/' ? 'index.html' : req.url.slice(1);
-    if (!['index.html', 'game.js', 'words_db.js'].includes(name)) {
+    if (!['index.html', 'game.js', 'words_db.js', 'vendor/wanakana.min.js'].includes(name)) {
         res.writeHead(404); res.end(); return;
     }
     res.setHeader('Content-Type', name.endsWith('.js') ? 'application/javascript' : 'text/html; charset=utf-8');
@@ -44,6 +44,7 @@ async function solveByPointer(page, reading, reverse = false) {
         assert.equal(await page.locator('#current-level-display').innerText(), 'N5 - 1');
         assert.equal(await page.locator('#level-select option').count(), 5);
         assert.ok(await page.evaluate(() => currentWords.every(w => document.getElementById(`word-${w.reading}`).querySelector('.word-text').textContent === w.meaning)));
+        assert.equal(await page.locator('.romaji-text:not(.hidden)').count(), 0);
         const words = await page.evaluate(() => currentWords.map(w => ({ id: w.id, reading: w.reading, expression: w.expression, meaning: w.meaning })));
         await page.locator('.star-btn').first().click();
         assert.ok(await page.evaluate(id => !!JSON.parse(localStorage.getItem('japaneseWordSearchV1DifficultWords'))[id], words[0].id));
@@ -51,9 +52,11 @@ async function solveByPointer(page, reading, reverse = false) {
         assert.equal(await page.locator('.word-item.found').count(), 1);
         assert.ok((await page.locator('.word-item.found').innerText()).includes(words[0].expression));
         assert.ok((await page.locator('.word-item.found').innerText()).includes(words[0].meaning));
+        assert.equal(await page.locator('.word-item.found .romaji-text').innerText(), await page.evaluate(reading => romajiText({reading}), words[0].reading));
         await page.locator('#btn-open-settings').click();
         await page.locator('#show-hints').uncheck();
         assert.equal(await page.locator('.word-item.found').count(), 1);
+        assert.equal(await page.locator('.romaji-text:not(.hidden)').count(), 1);
         assert.ok((await page.locator('.hint-text').allTextContents()).every(t => !t.includes('…')));
         const downloadEvent = page.waitForEvent('download');
         await page.locator('#btn-download-difficult').click();
@@ -61,6 +64,7 @@ async function solveByPointer(page, reading, reverse = false) {
         await download.saveAs('/tmp/japanese-game-difficult.txt');
         const exported = fs.readFileSync('/tmp/japanese-game-difficult.txt', 'utf8');
         assert.ok(exported.includes(words[0].expression) && exported.includes(words[0].meaning));
+        assert.ok(exported.includes(await page.evaluate(reading => romajiText({reading}), words[0].reading)));
         await page.locator('#btn-back-game').click();
         for (const w of words.slice(1)) await solveByPointer(page, w.reading);
         assert.equal(await page.evaluate(() => foundWords.size), words.length);
@@ -70,6 +74,7 @@ async function solveByPointer(page, reading, reverse = false) {
         assert.equal(await page.locator('#show-hints').isChecked(), false);
         await page.locator('#btn-giveup').click();
         assert.equal(await page.locator('.word-item.revealed').count(), await page.evaluate(() => currentWords.length));
+        assert.equal(await page.locator('.romaji-text:not(.hidden)').count(), await page.evaluate(() => currentWords.length));
         await page.locator('#btn-restart').click();
         await page.waitForTimeout(900);
         assert.equal(await page.locator('#win-overlay').evaluate(e => e.classList.contains('hidden')), true);

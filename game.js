@@ -1,4 +1,4 @@
-        const VERSION = "v2.0.0";
+		const VERSION = "v2.1.0";
         console.log('VERSION:', VERSION);
         // === 核心工具 ===
         function mulberry32(a) {
@@ -29,6 +29,22 @@
         const levelLabel = level => `N${6 - level}`;
         const answerText = word => word.expression === word.reading
             ? word.expression : `${word.expression}（${word.reading}）`;
+        // Keep long vowels spelled out (gakkou / koohii) to match the kana grid.
+        const romajiOptions = { customRomajiMapping: {
+            'うぃ': 'wi', 'うぇ': 'we', 'うぉ': 'wo',
+            'しぇ': 'she', 'じぇ': 'je', 'ちぇ': 'che',
+            'てぃ': 'ti', 'でぃ': 'di', 'とぅ': 'tu', 'どぅ': 'du',
+            'ふぁ': 'fa', 'ふぃ': 'fi', 'ふぇ': 'fe', 'ふぉ': 'fo',
+            'ゔぁ': 'va', 'ゔぃ': 'vi', 'ゔぇ': 've', 'ゔぉ': 'vo',
+            'ヶ': 'ka', 'ヵ': 'ka',
+        } };
+        const romajiText = word => wanakana.toRomaji(wanakana.toKatakana(word.reading), romajiOptions);
+        function revealAnswer(item, word) {
+            item.querySelector('.word-text').textContent = answerText(word);
+            item.querySelector('.romaji-text').textContent = romajiText(word);
+            item.querySelector('.romaji-text').classList.remove('hidden');
+            item.querySelector('.meaning-text').classList.remove('hidden');
+        }
         let overlayTimer;
         let activeDirections = [[0, 1], [1, 0]];
         const hintToggle = document.getElementById('show-hints');
@@ -191,7 +207,7 @@
             let content = "日文找字 難詞複習表\n====================\n\n";
             words.sort().forEach(id => {
                 const word = difficultWordsMap[id];
-                content += `[${word.jlpt}] ${answerText(word)} : ${word.meaning}\n`;
+                content += `[${word.jlpt}] ${answerText(word)} / ${romajiText(word)} : ${word.meaning}\n`;
             });
 
             const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -545,8 +561,7 @@
                     if (li) {
                         li.classList.add('revealed');
                         // 揭示日文寫法及讀音
-                        li.querySelector('.word-text').textContent = answerText(wordObj);
-                        li.querySelector('small').classList.remove('hidden');
+                        revealAnswer(li, wordObj);
                         // 移除 title 以免干擾
                         li.removeAttribute('title');
                     }
@@ -673,13 +688,18 @@
                 const mainText = document.createElement('span');
                 mainText.className = 'word-text text-base leading-snug';
                 mainText.textContent = solved || revealed ? answerText(wordObj) : fullText;
+                const romaji = document.createElement('small');
+                romaji.className = 'romaji-text text-green-700 text-sm leading-snug';
+                romaji.textContent = solved || revealed ? romajiText(wordObj) : '';
+                romaji.classList.toggle('hidden', !solved && !revealed);
                 const detail = document.createElement('small');
-                detail.className = 'text-slate-500 text-xs leading-snug';
+                detail.className = 'meaning-text text-slate-500 text-xs leading-snug';
                 detail.textContent = fullText;
                 const hint = document.createElement('small');
                 hint.className = 'text-slate-500 text-xs hint-text';
                 hint.textContent = hintText;
                 textDiv.appendChild(mainText);
+                textDiv.appendChild(romaji);
                 // Keep the meaning visible when the Japanese answer is revealed.
                 detail.classList.toggle('hidden', !solved && !revealed);
                 textDiv.appendChild(detail);
@@ -895,8 +915,7 @@
 
                     const wordObj = currentWords.find(w => w.reading === foundMatch);
                     if(wordObj) {
-                        listItem.querySelector('.word-text').textContent = answerText(wordObj);
-                        listItem.querySelector('small').classList.remove('hidden');
+                        revealAnswer(listItem, wordObj);
                     }
                     // 移除 title
                     listItem.removeAttribute('title');
@@ -1043,4 +1062,3 @@ function runSimulation() {
 
         // 程式進入點
         initializeGameSystem();
-

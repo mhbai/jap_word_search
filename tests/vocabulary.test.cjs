@@ -13,6 +13,7 @@ function engine() {
         localStorage: { getItem: () => null }, window: {}, console,
     });
     vm.runInContext(fs.readFileSync(path.join(root, 'words_db.js'), 'utf8'), context);
+    vm.runInContext(fs.readFileSync(path.join(root, 'vendor/wanakana.min.js'), 'utf8'), context);
     const source = fs.readFileSync(path.join(root, 'game.js'), 'utf8')
         .replace(/^\s*initializeGameSystem\(\);\s*$/m, '');
     vm.runInContext(source, context);
@@ -96,4 +97,19 @@ test('single-cell selections, small kana and long vowels preserve spelling', () 
     assert.equal(run('calculateLine(2, 3, 2, 3).length'), 1);
     assert.equal(run("answerText({expression:'学校', reading:'がっこう'})"), '学校（がっこう）');
     assert.equal(run("answerText({expression:'スクール', reading:'スクール'})"), 'スクール');
+});
+
+test('romaji handles small kana, doubled consonants, long vowels and loanwords', () => {
+    const { context, run } = engine();
+    for (const [reading, expected] of [
+        ['でんわ', 'denwa'], ['がっこう', 'gakkou'], ['きょう', 'kyou'],
+        ['しんよう', "shin'you"], ['スクール', 'sukuuru'], ['コーヒー', 'koohii'],
+        ['ティッシュ', 'tisshu'], ['ウェイター', 'weitaa'], ['ディーゼル', 'diizeru'],
+        ['ジェット', 'jetto'], ['チェック', 'chekku'], ['ファックス', 'fakkusu'],
+        ['しーん', 'shiin'], ['ヶげつ', 'kagetsu'],
+    ]) {
+        context.readingUnderTest = reading;
+        assert.equal(run('romajiText({reading:readingUnderTest})'), expected);
+    }
+    assert.equal(run(`Object.values(WORDS_DB).flat().filter(w => !/^[a-z']+$/.test(romajiText(w))).length`), 0);
 });
