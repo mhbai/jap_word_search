@@ -92,6 +92,48 @@ test('placement fallback preserves every word when random placement fails', () =
     }
 });
 
+test('shared kana are placed at a crossing when a crossing fits', () => {
+    const { run } = engine();
+    const result = run(`
+        GRID_SIZE = 7;
+        activeDirections = DIRECTIONS.slice(0, 2);
+        tryBuildGrid([{reading:'あいう'}, {reading:'かいき'}], mulberry32(123));
+    `);
+    assert.equal(result.placedWords.length, 2);
+    assert.equal(result.crossings, 1);
+    const first = result.paths['あいう'];
+    const second = result.paths['かいき'];
+    assert.equal(first[1].r, second[1].r);
+    assert.equal(first[1].c, second[1].c);
+    assert.notEqual(first[2].r - first[0].r, second[2].r - second[0].r);
+});
+
+test('complete grids still receive all 15 placement attempts', () => {
+    const { run } = engine();
+    const attempts = run(`
+        GRID_SIZE = 6;
+        let count = 0;
+        const originalBuilder = tryBuildGrid;
+        tryBuildGrid = (words, rng) => { count++; return originalBuilder(words, rng); };
+        runEvolutionaryPlacement([{reading:'でんわ'}], mulberry32(123));
+        count;
+    `);
+    assert.equal(attempts, 15);
+});
+
+test('words without shared kana are still placed and do not claim a crossing', () => {
+    const { run } = engine();
+    const result = run(`
+        GRID_SIZE = 6;
+        activeDirections = DIRECTIONS;
+        tryBuildGrid([{reading:'あいう'}, {reading:'かきく'}], mulberry32(123));
+    `);
+    assert.equal(result.placedWords.length, 2);
+    assert.equal(result.intersections, 0);
+    assert.equal(result.crossings, 0);
+    assert.equal(run('canPlaceWordInGrid(Array.from({length:6},()=>Array(6).fill("")), "あい", 6, 0, -1, 0)'), false);
+});
+
 test('single-cell selections, small kana and long vowels preserve spelling', () => {
     const { run } = engine();
     assert.equal(run('calculateLine(2, 3, 2, 3).length'), 1);

@@ -1,4 +1,4 @@
-		const VERSION = "v2.1.0";
+		const VERSION = "v2.2.0";
         console.log('VERSION:', VERSION);
         // === 核心工具 ===
         function mulberry32(a) {
@@ -407,7 +407,8 @@
             for (let gen = 0; gen < MAX_GENERATIONS; gen++) {
                 const result = tryBuildGrid(currentOrder, rng);
 
-                let score = result.placedWords.length * 1000 + result.intersections * 10;
+                const score = result.placedWords.length * 100000
+                    + (result.crossings || 0) * 100 + result.intersections;
 
                 if (score > bestScore) {
                     bestScore = score;
@@ -417,10 +418,10 @@
                 }
 
                 if (result.failedWords.length > 0) {
-                    const successfulShuffled = seededShuffle(result.placedWords.map(w => w.originalObj), Math.floor(rng() * 10000));
+                    const successfulShuffled = seededShuffle(result.placedWords, Math.floor(rng() * 10000));
                     currentOrder = [...result.failedWords, ...successfulShuffled];
                 } else {
-                    break;
+                    currentOrder = seededShuffle(currentOrder, Math.floor(rng() * 10000));
                 }
             }
 
@@ -443,60 +444,98 @@
             };
         }
 
+        function findIntersectingPlacement(g, word, anchors, cellDirections, rng) {
+            let best = null;
+            let tied = 0;
+            const checked = new Set();
+            for (let i = 0; i < word.length; i++) {
+                for (const anchor of anchors.get(word[i]) || []) {
+                    for (const [dr, dc] of activeDirections) {
+                        const r = anchor.r - i * dr;
+                        const c = anchor.c - i * dc;
+                        const key = `${r},${c},${dr},${dc}`;
+                        if (checked.has(key)) continue;
+                        checked.add(key);
+                        if (r < 0 || c < 0 || !canPlaceWordInGrid(g, word, r, c, dr, dc)) continue;
+                        let shared = 0;
+                        let crossings = 0;
+                        for (let j = 0; j < word.length; j++) {
+                            const owners = cellDirections.get(`${r + j * dr},${c + j * dc}`);
+                            if (!owners) continue;
+                            shared++;
+                            // Parallel overlaps count less than words crossing in different directions.
+                            if (word.length > 1 && owners.some(([otherR, otherC]) => dr * otherC !== dc * otherR)) crossings++;
+                        }
+                        const score = crossings * 100 + shared;
+                        if (!best || score > best.score) {
+                            best = { r, c, dr, dc, score, crossings };
+                            tied = 1;
+                        } else if (score === best.score && rng() < 1 / ++tied) {
+                            best = { r, c, dr, dc, score, crossings };
+                        }
+                    }
+                }
+            }
+            return best;
+        }
+
         function tryBuildGrid(orderedWords, rng) {
-            let tempGrid = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(''));
-            let placedWords = [];
-            let failedWords = [];
-            let paths = {};
+            const tempGrid = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(''));
+            const placedWords = [];
+            const failedWords = [];
+            const paths = {};
+            const anchors = new Map();
+            const cellDirections = new Map();
             let intersections = 0;
+            let crossings = 0;
 
             for (const wordObj of orderedWords) {
                 const word = wordObj.reading;
-                let placed = false;
-
-                let attempts = 0;
-                while (!placed && attempts < 50) {
-                    const dir = activeDirections[Math.floor(rng() * activeDirections.length)];
+                let placement = findIntersectingPlacement(tempGrid, word, anchors, cellDirections, rng);
+                // Words without a usable shared kana still get a random valid position.
+                for (let attempt = 0; !placement && attempt < 50; attempt++) {
+                    const [dr, dc] = activeDirections[Math.floor(rng() * activeDirections.length)];
                     const r = Math.floor(rng() * GRID_SIZE);
                     const c = Math.floor(rng() * GRID_SIZE);
-
-                    if (canPlaceWordInGrid(tempGrid, word, r, c, dir[0], dir[1])) {
-                        intersections += placeWordInGrid(tempGrid, word, r, c, dir[0], dir[1], paths);
-                        placedWords.push(wordObj);
-                        placedWords[placedWords.length-1].originalObj = wordObj;
-                        placed = true;
-                    }
-                    attempts++;
+                    if (canPlaceWordInGrid(tempGrid, word, r, c, dr, dc)) placement = { r, c, dr, dc, crossings: 0 };
                 }
-
-                if (!placed) {
-                    const shuffledDirs = seededShuffle([...activeDirections], Math.floor(rng() * 10000));
-                    for (let r = 0; r < GRID_SIZE; r++) {
+                if (!placement) {
+                    const directions = seededShuffle([...activeDirections], Math.floor(rng() * 10000));
+                    search: for (let r = 0; r < GRID_SIZE; r++) {
                         for (let c = 0; c < GRID_SIZE; c++) {
-                            for (const dir of shuffledDirs) {
-                                if (canPlaceWordInGrid(tempGrid, word, r, c, dir[0], dir[1])) {
-                                    intersections += placeWordInGrid(tempGrid, word, r, c, dir[0], dir[1], paths);
-                                    placedWords.push(wordObj);
-                                    placedWords[placedWords.length-1].originalObj = wordObj;
-                                    placed = true;
-                                    break;
+                            for (const [dr, dc] of directions) {
+                                if (canPlaceWordInGrid(tempGrid, word, r, c, dr, dc)) {
+                                    placement = { r, c, dr, dc, crossings: 0 };
+                                    break search;
                                 }
                             }
-                            if (placed) break;
                         }
-                        if (placed) break;
                     }
                 }
-
-                if (!placed) {
+                if (!placement) {
                     failedWords.push(wordObj);
+                    continue;
                 }
+                const { r, c, dr, dc } = placement;
+                intersections += placeWordInGrid(tempGrid, word, r, c, dr, dc, paths);
+                crossings += placement.crossings;
+                placedWords.push(wordObj);
+                paths[word].forEach((point, i) => {
+                    const key = `${point.r},${point.c}`;
+                    if (!cellDirections.has(key)) {
+                        if (!anchors.has(word[i])) anchors.set(word[i], []);
+                        anchors.get(word[i]).push(point);
+                        cellDirections.set(key, []);
+                    }
+                    // Single-cell words have no direction and cannot inflate the crossing score.
+                    if (word.length > 1) cellDirections.get(key).push([dr, dc]);
+                });
             }
-
-            return { grid: tempGrid, placedWords, failedWords, paths, intersections };
+            return { grid: tempGrid, placedWords, failedWords, paths, intersections, crossings };
         }
 
         function canPlaceWordInGrid(g, word, r, c, dr, dc) {
+            if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return false;
             const endR = r + (word.length - 1) * dr;
             const endC = c + (word.length - 1) * dc;
             if (endR < 0 || endR >= GRID_SIZE || endC < 0 || endC >= GRID_SIZE) {
